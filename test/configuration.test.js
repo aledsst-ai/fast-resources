@@ -56,7 +56,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação estável aponta para o repositório de atualizações', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.4');
+  assert.equal(pkg.version, '1.1.5');
   assert.equal(pkg.testBuild, undefined);
   assert.equal(pkg.build.appId, 'gg.metropole.mtpautotimesheet');
   assert.deepEqual(pkg.build.publish[0], {

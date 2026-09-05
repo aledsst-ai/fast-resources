@@ -35,11 +35,11 @@ O instalador é gerado em `dist/`.
 
 ## Publicação de atualização
 
-Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.4`) em
+Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.5`) em
 `aledsst-ai/fast-resources` e anexe os três arquivos gerados em `dist/`:
 
-- `mtp-auto-timesheet-setup-1.1.4.exe`
-- `mtp-auto-timesheet-setup-1.1.4.exe.blockmap`
+- `mtp-auto-timesheet-setup-1.1.5.exe`
+- `mtp-auto-timesheet-setup-1.1.5.exe.blockmap`
 - `latest.yml`
 
 O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
@@ -63,3 +63,11 @@ O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
   **Sair de Serviço**.
 - Ignora cliques no menu lateral e em outros elementos cujo contêiner também
   inclua o texto do botão de serviço.
+
+## Correção da versão 1.1.5
+
+- Valida novamente no processo principal se o evento veio exatamente dos
+  controles **Entrar em Serviço** ou **Sair de Serviço**.
+- Bloqueia eventos amplos enviados por listeners antigos que continuaram vivos
+  no FiveM durante uma atualização automática.
+- Reinstala o observer atual quando encontra o marcador de uma versão anterior.

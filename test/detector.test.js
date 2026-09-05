@@ -5,6 +5,7 @@ const { EventEmitter } = require('node:events');
 const {
   DutyDetector,
   inferDutyTarget,
+  normalizeTabletDutyAction,
   OBSERVER_SOURCE,
   wireDetector,
   sleep,
@@ -14,6 +15,49 @@ test('script injetado no tablet compila e contém o listener de ação', () => {
   assert.doesNotThrow(() => new Function(OBSERVER_SOURCE));
   assert.match(OBSERVER_SOURCE, /duty-action/);
   assert.match(OBSERVER_SOURCE, /sair.*servi\[cç\]o/i);
+});
+
+test('processo principal rejeita evento amplo deixado por listener antigo', () => {
+  assert.equal(normalizeTabletDutyAction({
+    action: 'enter',
+    target: 'on-duty',
+    text: 'Início Ocorrências Cidadãos Fora de Serviço ENTRAR EM SERVIÇO',
+  }), null);
+  assert.deepEqual(normalizeTabletDutyAction({
+    action: 'exit',
+    target: 'off-duty',
+    text: '  ENTRAR\nEM SERVIÇO ',
+  }), {
+    action: 'enter',
+    target: 'on-duty',
+    text: 'ENTRAR EM SERVIÇO',
+  });
+  assert.deepEqual(normalizeTabletDutyAction({ text: 'SAIR DE SERVIÇO' }), {
+    action: 'exit',
+    target: 'off-duty',
+    text: 'SAIR DE SERVIÇO',
+  });
+});
+
+test('nova versão do observer reinstala mesmo quando o marcador legado permanece no FiveM', () => {
+  const listeners = new Map();
+  const document = {
+    documentElement: {},
+    querySelectorAll: () => [],
+    addEventListener: (type, listener) => listeners.set(type, listener),
+  };
+  class FakeMutationObserver {
+    observe() {}
+    disconnect() {}
+  }
+  const window = {
+    __mtpAutoTimesheetInstalled: true,
+    mtpAutoTimesheetOnStatus: () => {},
+  };
+  const runObserver = new Function('window', 'document', 'MutationObserver', 'location', OBSERVER_SOURCE);
+  assert.equal(runObserver(window, document, FakeMutationObserver, { href: 'tablet' }), undefined);
+  assert.equal(typeof listeners.get('click'), 'function');
+  assert.equal(window.__mtpAutoTimesheetInstalled, '1.1.5');
 });
 
 function installFakeTabletObserver() {

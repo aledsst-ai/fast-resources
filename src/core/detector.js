@@ -23,6 +23,7 @@ const CHARACTER_DATA_URL = 'https://api.metropole.gg/gameapi-01/character/data';
 
 const BINDING_NAME = 'mtpAutoTimesheetOnStatus';
 const ISOLATED_WORLD_NAME = 'mtpAutoTimesheetWorld';
+const OBSERVER_VERSION = '1.1.5';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -120,12 +121,27 @@ function inferDutyTarget(request = {}) {
   return null;
 }
 
+// Eventos do mundo injetado não são confiáveis entre atualizações: se o FiveM
+// continuar aberto, um listener de uma versão anterior pode permanecer vivo no
+// frame. Por isso o processo principal valida novamente o rótulo e deriva dele
+// a ação, sem confiar em target/action enviados pelo JavaScript do tablet.
+function normalizeTabletDutyAction(payload = {}) {
+  const text = String(payload.text || '').replace(/\s+/g, ' ').trim();
+  if (/^entrar em servi[cç]o$/i.test(text)) {
+    return { action: 'enter', target: 'on-duty', text };
+  }
+  if (/^sair de servi[cç]o$/i.test(text)) {
+    return { action: 'exit', target: 'off-duty', text };
+  }
+  return null;
+}
+
 // -------- Observer script injetado no metro-inventory --------
 
 const OBSERVER_SOURCE = `
 (function(){
-  if (window.__mtpAutoTimesheetInstalled) return 'already';
-  window.__mtpAutoTimesheetInstalled = true;
+  if (window.__mtpAutoTimesheetInstalled === '${OBSERVER_VERSION}') return 'already';
+  window.__mtpAutoTimesheetInstalled = '${OBSERVER_VERSION}';
 
   var lastText = null;
   var lastActionAt = 0;
@@ -140,10 +156,10 @@ const OBSERVER_SOURCE = `
     // O texto precisa ser somente o rótulo do botão. Um clique em qualquer
     // outro item também percorre contêineres ancestrais; esses contêineres
     // incluem o texto do botão de serviço e não representam uma ação nele.
-    if (/^sair(?:[ ]+de)?[ ]+servi[cç]o$/i.test(value)) {
+    if (/^sair[ ]+de[ ]+servi[cç]o$/i.test(value)) {
       return { action: 'exit', target: 'off-duty', text: value };
     }
-    if (/^entrar(?:[ ]+em)?[ ]+servi[cç]o$/i.test(value)) {
+    if (/^entrar[ ]+em[ ]+servi[cç]o$/i.test(value)) {
       return { action: 'enter', target: 'on-duty', text: value };
     }
     return null;
@@ -328,6 +344,13 @@ class DutyDetector extends EventEmitter {
   }
 
   _handleTabletAction(payload) {
+    const normalized = normalizeTabletDutyAction(payload);
+    if (!normalized) {
+      const preview = String(payload && payload.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      log(`Clique do tablet ignorado: o elemento clicado não é o botão de serviço${preview ? ` — "${preview}"` : ''}.`);
+      return false;
+    }
+    payload = { ...payload, ...normalized };
     const now = Date.now();
     if (this._lastTabletAction
         && this._lastTabletAction.target === payload.target
@@ -346,6 +369,7 @@ class DutyDetector extends EventEmitter {
       }, delay);
       this._fastPollTimers.add(timer);
     }
+    return true;
   }
 
   async _tryAttach() {
@@ -784,4 +808,4 @@ function wireDetector(detector, clickButton) {
   return ctl;
 }
 
-module.exports = { DutyDetector, wireDetector, inferDutyTarget, OBSERVER_SOURCE, NUI_URL, sleep };
+module.exports = { DutyDetector, wireDetector, inferDutyTarget, normalizeTabletDutyAction, OBSERVER_SOURCE, NUI_URL, sleep };
