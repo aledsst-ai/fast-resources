@@ -7,7 +7,8 @@ const fs = require('fs');
 const { log, setLogFile } = require('./core/logger');
 const { DutyDetector, wireDetector, NUI_URL } = require('./core/detector');
 const { DiscordClient } = require('./discord');
-const { configureNotifier, attachNotifications } = require('./notifier');
+const { ClipboardHelper } = require('./clipboard-helper');
+const { notify, configureNotifier, attachNotifications } = require('./notifier');
 const { closeAllToasts } = require('./toast');
 const { setupUpdater, updateReady, installNow, checkNow } = require('./updater');
 
@@ -18,6 +19,7 @@ let tray = null;
 let detector = null;
 let ctl = null;
 let discord = null;
+let clipboardHelper = null;
 let paused = false;
 let loggedIn = false;
 let quitting = false;
@@ -74,6 +76,68 @@ function soundEnabled() {
   return cfg.sound !== false; // ligado por padrão
 }
 
+function clipboardHelperEnabled() {
+  const cfg = readConfig();
+  return cfg.clipboardHelper !== false; // ligado por padrão
+}
+
+function clipboardHelperLabel() {
+  if (!clipboardHelperEnabled()) return 'Desativado';
+  if (!clipboardHelper) return 'Aguardando inicialização';
+  const state = clipboardHelper.state;
+  if (state.conflict) return 'Outro auxiliar FAST já está aberto';
+  if (state.error) return `Erro — ${state.error}`;
+  if (!state.ready) return 'Iniciando';
+  if (state.active) {
+    const field = state.field || 'próximo campo';
+    return `Próximo: ${field} (${state.index + 1}/${state.count})`;
+  }
+  return 'Ativo — aguardando sequência';
+}
+
+function ensureClipboardHelper() {
+  if (!clipboardHelper) {
+    clipboardHelper = new ClipboardHelper();
+    clipboardHelper.on('state', updateTray);
+    clipboardHelper.on('helper-error', (message) => {
+      notify('FAST - Auxiliar Ctrl+V', message, 'error');
+    });
+    clipboardHelper.on('helper-event', ({ name, count }) => {
+      if (name === 'sequence-ready') {
+        notify('FAST - Auxiliar Ctrl+V', `${count} campos preparados. Use Ctrl+V em cada campo do jogo.`, 'success');
+      } else if (name === 'sequence-complete') {
+        notify('FAST - Auxiliar Ctrl+V', 'Todos os campos foram colados.', 'success');
+      } else if (name === 'sequence-cancelled') {
+        notify('FAST - Auxiliar Ctrl+V', 'Sequência cancelada. O Ctrl+V voltou ao normal.');
+      }
+    });
+    clipboardHelper.on('exit', ({ conflict, unexpected }) => {
+      if (conflict) {
+        notify('FAST - Auxiliar Ctrl+V', 'Outro auxiliar FAST já está aberto. Encerre a versão separada para usar a integrada.', 'error');
+      } else if (unexpected) {
+        notify('FAST - Auxiliar Ctrl+V', 'O componente de colagem foi encerrado inesperadamente.', 'error');
+      }
+    });
+  }
+  return clipboardHelper;
+}
+
+function startClipboardHelper() {
+  if (!clipboardHelperEnabled()) return false;
+  return ensureClipboardHelper().start();
+}
+
+async function stopClipboardHelper() {
+  if (clipboardHelper) await clipboardHelper.stop();
+}
+
+async function toggleClipboardHelper(enabled) {
+  writeConfig({ clipboardHelper: enabled });
+  if (enabled) startClipboardHelper();
+  else await stopClipboardHelper();
+  updateTray();
+}
+
 // -------- Bandeja --------
 
 function trayState() {
@@ -124,6 +188,19 @@ function updateTray() {
       checked: soundEnabled(),
       enabled: notificationsEnabled(),
       click: (item) => { writeConfig({ sound: item.checked }); updateTray(); },
+    },
+    { type: 'separator' },
+    { label: `Auxiliar Ctrl+V: ${clipboardHelperLabel()}`, enabled: false },
+    {
+      label: 'Ativar Auxiliar Ctrl+V',
+      type: 'checkbox',
+      checked: clipboardHelperEnabled(),
+      click: (item) => toggleClipboardHelper(item.checked),
+    },
+    {
+      label: 'Cancelar sequência Ctrl+V',
+      enabled: !!(clipboardHelper && clipboardHelper.state.active),
+      click: () => clipboardHelper && clipboardHelper.cancel(),
     },
     {
       label: 'Iniciar com o Windows',
@@ -189,7 +266,12 @@ async function doQuit() {
   if (tray) tray.setToolTip('mtp-auto-timesheet — encerrando...');
   log('Encerrando a pedido do usuário.');
   closeAllToasts();
-  try { await stopMonitor('programa encerrado'); } catch (err) { log(`Erro ao encerrar: ${err.message}`); }
+  try {
+    await Promise.all([
+      stopMonitor('programa encerrado'),
+      stopClipboardHelper(),
+    ]);
+  } catch (err) { log(`Erro ao encerrar: ${err.message}`); }
   app.exit(0);
 }
 
@@ -217,12 +299,16 @@ app.whenReady().then(async () => {
       return detector.notifyInGame(t, b, type, som);
     },
   });
+  startClipboardHelper();
   discord = new DiscordClient();
 
   // beforeInstall: o updater reinicia o app, então o ponto precisa fechar antes.
   setupUpdater({
     onChange: updateTray,
-    beforeInstall: () => stopMonitor('atualizando o programa'),
+    beforeInstall: () => Promise.all([
+      stopMonitor('atualizando o programa'),
+      stopClipboardHelper(),
+    ]),
   });
 
   // Primeira execução: liga o autostart por padrão, mas só uma vez —
@@ -240,6 +326,10 @@ app.whenReady().then(async () => {
       detail: 'O programa continua na bandeja (perto do relógio). Clique com o botão direito no ícone e escolha "Entrar no Discord..." para tentar de novo.',
     }).catch(() => {});
   }
+});
+
+app.on('before-quit', () => {
+  if (clipboardHelper) clipboardHelper.stopNow();
 });
 
 process.on('uncaughtException', (err) => {

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync, spawn } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 
@@ -43,10 +44,70 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação aponta para o novo repositório', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.0.7');
+  assert.equal(pkg.version, '1.1.0');
   assert.deepEqual(pkg.build.publish[0], {
     provider: 'github',
     owner: 'aledsst-ai',
     repo: 'fast-resources',
+  });
+});
+
+test('auxiliar Ctrl+V integrado compila e mantém compatibilidade com o site FAST', { timeout: 30_000 }, () => {
+  const helper = path.join(root, 'helper', 'clipboard-helper.ps1');
+  execFileSync('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', helper,
+    '-ValidateOnly',
+  ], { stdio: 'pipe' });
+  const source = fs.readFileSync(helper, 'utf8');
+  assert.match(source, /FAST_ANNOUNCEMENT_QUEUE_V1\|/);
+  assert.match(source, /SetWindowsHookEx/);
+  assert.match(source, /LlkhfInjected/);
+});
+
+test('aplicativo gerencia o auxiliar pela mesma bandeja', () => {
+  const main = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  assert.match(main, /Ativar Auxiliar Ctrl\+V/);
+  assert.match(main, /Cancelar sequência Ctrl\+V/);
+  assert.match(main, /startClipboardHelper\(\)/);
+  const pkg = require(path.join(root, 'package.json'));
+  assert.equal(pkg.build.extraResources[0].to, 'helper');
+});
+
+test('ponte Ctrl+V inicia e encerra pelo canal interno', { timeout: 15_000 }, async (t) => {
+  const helper = path.join(root, 'helper', 'clipboard-helper.ps1');
+  await new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', helper,
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let output = '';
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`timeout aguardando auxiliar: ${output}`));
+    }, 10_000);
+    child.stdout.on('data', (chunk) => {
+      output += String(chunk);
+      if (output.includes('FAST_HELPER|READY')) child.stdin.write('stop\n');
+    });
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timeout);
+      if (code === 10) {
+        t.skip('a versão separada do auxiliar já está em execução');
+        resolve();
+      } else if (code !== 0) {
+        reject(new Error(`auxiliar encerrou com código ${code}: ${output}`));
+      } else {
+        assert.match(output, /FAST_HELPER\|READY/);
+        assert.match(output, /FAST_HELPER\|STATUS\|0\|0\|0\|/);
+        resolve();
+      }
+    });
   });
 });
