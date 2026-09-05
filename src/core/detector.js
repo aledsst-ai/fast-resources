@@ -15,6 +15,9 @@ const WAIT_FIVEM_POLL_MS = 3_000;   // intervalo de sondagem enquanto o FiveM n�
 const WAIT_LOG_EVERY = 20;          // loga "aguardando" a cada N sondagens (~1min)
 const CLOSE_RETRY_ATTEMPTS = 5;     // tentativas de fechar o ponto quando o FiveM cai
 const CLOSE_RETRY_DELAY_MS = 10_000;
+const FAST_POLL_DELAYS_MS = [250, 750, 1_500, 3_000];
+const RECONCILE_RETRY_ATTEMPTS = 3;
+const RECONCILE_RETRY_DELAY_MS = 3_000;
 
 const CHARACTER_DATA_URL = 'https://api.metropole.gg/gameapi-01/character/data';
 
@@ -103,6 +106,20 @@ function flattenFrames(node, acc = []) {
   return acc;
 }
 
+function inferDutyTarget(request = {}) {
+  const url = String(request.url || '');
+  const body = String(request.postData || '');
+  if (!/api\.metropole\.gg\/gameapi-01\//i.test(url)) return null;
+  const relevant = /(?:duty|servi[cç]o|police|tablet)/i.test(`${url} ${body}`)
+    || /["']action["']\s*:\s*["'](?:enter|exit)["']/i.test(body);
+  if (!relevant) return null;
+  if (/(?:^|[^a-z])(?:exit|off[ -]?duty|sair)(?:[^a-z]|$)/i.test(body)
+      || /(?:exit|off[ -]?duty|sair)/i.test(url)) return 'off-duty';
+  if (/(?:^|[^a-z])(?:enter|on[ -]?duty|entrar)(?:[^a-z]|$)/i.test(body)
+      || /(?:enter|on[ -]?duty|entrar)/i.test(url)) return 'on-duty';
+  return null;
+}
+
 // -------- Observer script injetado no metro-inventory --------
 
 const OBSERVER_SOURCE = `
@@ -111,8 +128,22 @@ const OBSERVER_SOURCE = `
   window.__mtpAutoTimesheetInstalled = true;
 
   var lastText = null;
-  var send = function(text){
-    try { window.${BINDING_NAME}(JSON.stringify({ text: text || '' })); } catch(e) {}
+  var lastActionAt = 0;
+  var send = function(payload){
+    try { window.${BINDING_NAME}(JSON.stringify(payload)); } catch(e) {}
+  };
+  var clean = function(value){
+    return String(value || '').replace(/\\s+/g, ' ').trim();
+  };
+  var actionFromText = function(text){
+    var value = clean(text);
+    if (/sair(?:[ ]+de)?[ ]+servi[cç]o/i.test(value)) {
+      return { action: 'exit', target: 'off-duty', text: value };
+    }
+    if (/entrar(?:[ ]+em)?[ ]+servi[cç]o/i.test(value)) {
+      return { action: 'enter', target: 'on-duty', text: value };
+    }
+    return null;
   };
   var findSpan = function(){
     var spans = document.querySelectorAll('span');
@@ -129,7 +160,7 @@ const OBSERVER_SOURCE = `
     var text = s ? (s.textContent || '') : '';
     if (text !== lastText) {
       lastText = text;
-      send(text);
+      send({ kind: 'status', text: text, frame: location.href });
     }
     if (!fromInner && s !== trackedSpan) {
       innerObs.disconnect();
@@ -139,6 +170,32 @@ const OBSERVER_SOURCE = `
   }
   var rootObs = new MutationObserver(function(){ checkAndDispatch(false); });
   rootObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+  // O tablet costuma fechar no mesmo clique que troca o serviço. Capturamos a
+  // intenção na fase capture, antes de o DOM desaparecer, e depois confirmamos
+  // pela API/observer. O listener cobre clique por mouse e ativação por teclado.
+  document.addEventListener('click', function(event){
+    var path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    if (!path.length && event.target) path = [event.target];
+    for (var i = 0; i < path.length && i < 8; i++) {
+      var node = path[i];
+      if (!node || typeof node.textContent !== 'string') continue;
+      var action = actionFromText(node.innerText || node.textContent);
+      if (!action) continue;
+      var now = Date.now();
+      if (now - lastActionAt < 1_000) return;
+      lastActionAt = now;
+      send({
+        kind: 'duty-action',
+        action: action.action,
+        target: action.target,
+        text: action.text,
+        frame: location.href
+      });
+      return;
+    }
+  }, true);
+
   checkAndDispatch(false);
   return 'installed';
 })()
@@ -162,6 +219,11 @@ class DutyDetector extends EventEmitter {
     this._pollTimer = null;
     this._polling = false;
     this._bearerToken = null;         // JWT extraído de localStorage/sessionStorage
+    this._requestUrlById = new Map(); // correlaciona ExtraInfo com a URL original
+    this._pendingDutyRequests = new Map();
+    this._fastPollTimers = new Set();
+    this._lastTabletAction = null;
+    this._lastPollError = null;
     this._overlayCtx = null;          // contexto isolado do overlay na raiz da NUI
     this._rootFrameId = null;
   }
@@ -251,6 +313,8 @@ class DutyDetector extends EventEmitter {
     this.stopped = true;
     this._stopHeartbeat();
     this._stopPolling();
+    for (const timer of this._fastPollTimers) clearTimeout(timer);
+    this._fastPollTimers.clear();
     if (this.session) this.session.close();
   }
 
@@ -258,6 +322,27 @@ class DutyDetector extends EventEmitter {
     if (status === this._lastEmittedStatus) return;
     this._lastEmittedStatus = status;
     this.emit('status', { status, text: text || '', source });
+  }
+
+  _handleTabletAction(payload) {
+    const now = Date.now();
+    if (this._lastTabletAction
+        && this._lastTabletAction.target === payload.target
+        && now - this._lastTabletAction.at < 1_500) return;
+    this._lastTabletAction = { target: payload.target, at: now };
+    const frame = /police-tablet/i.test(payload.frame || '') ? 'police-tablet' : 'nui';
+    log(`Clique do tablet capturado antes do fechamento: ${payload.action} -> ${payload.target}.`);
+
+    // A intenção do próprio botão é o sinal mais rápido. Se o servidor rejeitar
+    // a ação, os polls logo abaixo corrigem o estado assim que a API responder.
+    this._dispatch(payload.target, payload.text || payload.action, `tablet-click:${frame}`);
+    for (const delay of FAST_POLL_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        this._fastPollTimers.delete(timer);
+        this._pollOnce(`confirmação +${delay}ms`).catch(() => {});
+      }, delay);
+      this._fastPollTimers.add(timer);
+    }
   }
 
   async _tryAttach() {
@@ -295,15 +380,20 @@ class DutyDetector extends EventEmitter {
         if (ev.name !== BINDING_NAME) return;
         let payload;
         try { payload = JSON.parse(ev.payload); } catch { return; }
+        if (payload.kind === 'duty-action' && /^(?:on|off)-duty$/.test(payload.target || '')) {
+          this._handleTabletAction(payload);
+          return;
+        }
         const text = payload.text || '';
         const status = !text ? 'unknown'
           : /fora de servi/i.test(text) ? 'off-duty'
           : 'on-duty';
-        this._dispatch(status, text, 'observer');
+        const frame = /police-tablet/i.test(payload.frame || '') ? 'police-tablet' : 'inventory';
+        this._dispatch(status, text, `observer:${frame}`);
       });
 
       // Frame navegou/foi anexado → tenta (re)injetar observer no metro-inventory se aparecer
-      const maybeInject = async () => { await this._tryInjectObserver(session).catch(() => {}); };
+      const maybeInject = async () => { await this._tryInjectObservers(session).catch(() => {}); };
       session.on('Page.frameNavigated', maybeInject);
       session.on('Page.frameAttached', maybeInject);
 
@@ -311,10 +401,34 @@ class DutyDetector extends EventEmitter {
       // É à prova de login: sempre pega o token atual que o jogo está usando,
       // sem depender de onde ele foi guardado (localStorage vs. memória).
       session.on('Network.requestWillBeSent', (ev) => {
-        this._captureTokenFromHeaders(ev.request && ev.request.headers, ev.request && ev.request.url);
+        const request = ev.request || {};
+        if (ev.requestId && request.url) {
+          this._requestUrlById.set(ev.requestId, request.url);
+          if (this._requestUrlById.size > 500) {
+            this._requestUrlById.delete(this._requestUrlById.keys().next().value);
+          }
+        }
+        this._captureTokenFromHeaders(request.headers, request.url);
+        const target = inferDutyTarget(request);
+        if (target && ev.requestId) {
+          this._pendingDutyRequests.set(ev.requestId, { target, url: request.url || '' });
+          log(`Ação de serviço observada na rede: ${target}. Aguardando resposta.`);
+        }
       });
       session.on('Network.requestWillBeSentExtraInfo', (ev) => {
-        this._captureTokenFromHeaders(ev.headers, null);
+        this._captureTokenFromHeaders(ev.headers, this._requestUrlById.get(ev.requestId));
+      });
+      session.on('Network.responseReceived', (ev) => {
+        const pending = this._pendingDutyRequests.get(ev.requestId);
+        if (!pending) return;
+        this._pendingDutyRequests.delete(ev.requestId);
+        const response = ev.response || {};
+        if (response.status >= 200 && response.status < 300) {
+          const pathname = (() => { try { return new URL(pending.url).pathname; } catch { return pending.url; } })();
+          this._dispatch(pending.target, `resposta ${response.status} em ${pathname}`, 'network:duty-action');
+        } else {
+          log(`Ação de serviço respondeu HTTP ${response.status || 'desconhecido'}; aguardando confirmação visual/API.`);
+        }
       });
 
       // Agora habilita os domínios (listeners já estão registrados)
@@ -324,7 +438,7 @@ class DutyDetector extends EventEmitter {
       await session.send('Runtime.addBinding', { name: BINDING_NAME });
 
       // Primeira tentativa de injeção (se inventário já estiver aberto)
-      await this._tryInjectObserver(session);
+      await this._tryInjectObservers(session);
 
       // Guarda o frame raiz e instala o overlay de avisos nele.
       this.session = session;
@@ -362,24 +476,23 @@ class DutyDetector extends EventEmitter {
     }
   }
 
-  // Extrai o Bearer token do header Authorization de um request observado na rede.
-  // Fonte primária e à prova de login — o tablet (cfx-nui-metro-police-tablet) manda
-  // o token pronto em toda chamada à api.metropole.gg.
+  // Mantém somente tokens da gameapi. A versão distribuída aceitava também os
+  // tokens de phoneapi e acabava substituindo um token válido por outro que não
+  // tinha acesso a character/data, inutilizando o fallback de confirmação.
   _captureTokenFromHeaders(headers, url) {
-    if (!headers) return;
+    if (!headers || !url || !/api\.metropole\.gg\/gameapi-01\//i.test(url)) return false;
     let auth = null;
     for (const k in headers) {
       if (k.toLowerCase() === 'authorization') { auth = headers[k]; break; }
     }
-    if (!auth || !/(^|\s)eyJ[A-Za-z0-9_-]+\./.test(auth)) return;
-    // Se soubermos a URL, só nos importa a API da metropole; extraInfo não traz URL.
-    if (url && !/api\.metropole\.gg/i.test(url)) return;
+    if (!auth || !/(^|\s)eyJ[A-Za-z0-9_-]+\./.test(auth)) return false;
     const bearer = /^Bearer\s/i.test(auth) ? auth : `Bearer ${auth}`;
-    if (bearer === this._bearerToken) return;
+    if (bearer === this._bearerToken) return true;
     const wasEmpty = !this._bearerToken;
     this._bearerToken = bearer;
-    const where = url ? new URL(url).pathname : 'rede';
+    const where = (() => { try { return new URL(url).pathname; } catch { return url; } })();
     log(`Token capturado via ${where}.${wasEmpty ? ' Poll API ativo.' : ' (rotacionado após login)'}`);
+    return true;
   }
 
   // Fallback: procura um JWT (padrão eyJ...) em localStorage/sessionStorage de todos os frames metro-*.
@@ -440,22 +553,33 @@ class DutyDetector extends EventEmitter {
     return null;
   }
 
-  async _tryInjectObserver(session) {
+  async _tryInjectObservers(session) {
     try {
       const { frameTree } = await session.send('Page.getFrameTree');
-      const frame = flattenFrames(frameTree).find(
-        (f) => /metro-inventory/i.test(f.name || '') || /metro-inventory/i.test(f.url || '')
+      const frames = flattenFrames(frameTree).filter(
+        (f) => /metro-(?:inventory|police-tablet)/i.test(f.name || '')
+          || /metro-(?:inventory|police-tablet)/i.test(f.url || '')
       );
-      if (!frame) { this.observerInstalled = false; return false; }
-      const iso = await session.send('Page.createIsolatedWorld', {
-        frameId: frame.id, worldName: ISOLATED_WORLD_NAME, grantUniveralAccess: true,
-      });
-      const res = await session.send('Runtime.evaluate', {
-        expression: OBSERVER_SOURCE, contextId: iso.executionContextId, returnByValue: true,
-      });
-      const outcome = res && res.result && res.result.value;
-      const ok = (outcome === 'installed' || outcome === 'already');
-      if (ok && !this.observerInstalled) log('Observer injetado no metro-inventory.');
+      if (!frames.length) { this.observerInstalled = false; return false; }
+      let installed = 0;
+      const labels = [];
+      for (const frame of frames) {
+        try {
+          const iso = await session.send('Page.createIsolatedWorld', {
+            frameId: frame.id, worldName: ISOLATED_WORLD_NAME, grantUniveralAccess: true,
+          });
+          const res = await session.send('Runtime.evaluate', {
+            expression: OBSERVER_SOURCE, contextId: iso.executionContextId, returnByValue: true,
+          });
+          const outcome = res && res.result && res.result.value;
+          if (outcome === 'installed' || outcome === 'already') {
+            installed += 1;
+            labels.push(/police-tablet/i.test(`${frame.name} ${frame.url}`) ? 'police-tablet' : 'inventory');
+          }
+        } catch {}
+      }
+      const ok = installed > 0;
+      if (ok && !this.observerInstalled) log(`Observers de serviço injetados: ${labels.join(', ')}.`);
       this.observerInstalled = ok;
       return ok;
     } catch (err) {
@@ -473,7 +597,7 @@ class DutyDetector extends EventEmitter {
     if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
   }
 
-  async _pollOnce() {
+  async _pollOnce(reason = 'periódico') {
     if (this._polling) return;
     this._polling = true;
     try {
@@ -491,12 +615,18 @@ class DutyDetector extends EventEmitter {
         });
       } finally { clearTimeout(t); }
 
-      if (res.status === 401) {
-        log('Token expirado (401). Invalidando cache; aguardando novo token.');
+      if (res.status === 401 || res.status === 403) {
+        log(`Token da gameapi recusado (${res.status}, ${reason}). Invalidando cache; aguardando novo token.`);
         this._bearerToken = null;
         return;
       }
-      if (!res.ok) return;
+      if (!res.ok) {
+        const marker = `${res.status}:${reason}`;
+        if (marker !== this._lastPollError) log(`Consulta character/data respondeu HTTP ${res.status} (${reason}).`);
+        this._lastPollError = marker;
+        return;
+      }
+      this._lastPollError = null;
 
       const body = await res.json();
       const character = (body && body.data) ? body.data : body;
@@ -509,8 +639,8 @@ class DutyDetector extends EventEmitter {
                    : 'unknown';
       if (status === 'unknown') return;
       this._dispatch(status, `duty.action=${duty.action}`, 'api:character/data');
-    } catch {
-      // erro de rede: silencioso
+    } catch (err) {
+      if (reason !== 'periódico') log(`Falha na consulta rápida character/data (${reason}): ${err.message}`);
     } finally {
       this._polling = false;
     }
@@ -573,41 +703,59 @@ class DutyDetector extends EventEmitter {
 function wireDetector(detector, clickButton) {
   const ctl = new EventEmitter();
   let pontoOpen = false;
-  let closing = false;
-  let opening = false;
+  let desiredOpen = null;
+  let desiredReason = '';
+  let desiredAttempts = RECONCILE_RETRY_ATTEMPTS;
+  let desiredDelay = RECONCILE_RETRY_DELAY_MS;
+  let reconcilePromise = null;
 
-  const setPonto = (open) => { pontoOpen = open; ctl.emit('ponto', { open }); };
-
-  const doOpen = async () => {
-    if (pontoOpen || opening) return false;
-    opening = true;
-    try {
-      await clickButton('Abrir Ponto');
-      setPonto(true);
-      log('>>> PONTO ABERTO <<<');
-      return true;
-    } catch (e) {
-      log(`Falha ao abrir ponto: ${e.message}`);
-      ctl.emit('erro', { action: 'abrir', message: e.message });
-      return false;
-    } finally { opening = false; }
+  const setPonto = (open) => {
+    if (pontoOpen === open) return;
+    pontoOpen = open;
+    ctl.emit('ponto', { open });
   };
 
-  const doClose = async (reason) => {
-    if (!pontoOpen || closing) return false;
-    closing = true;
-    try {
-      await clickButton('Fechar Ponto');
-      setPonto(false);
-      // O motivo fica só aqui, no log, pra diagnóstico — fora do aviso na tela.
-      log(`>>> PONTO FECHADO (${reason}) <<<`);
-      return true;
-    } catch (e) {
-      log(`Falha ao fechar ponto: ${e.message}`);
-      ctl.emit('erro', { action: 'fechar', message: e.message });
-      return false;
-    } finally { closing = false; }
+  const reconcile = () => {
+    if (reconcilePromise) return reconcilePromise;
+    reconcilePromise = (async () => {
+      let attempts = 0;
+      while (desiredOpen !== null && desiredOpen !== pontoOpen) {
+        const target = desiredOpen;
+        const action = target ? 'abrir' : 'fechar';
+        const button = target ? 'Abrir Ponto' : 'Fechar Ponto';
+        const reason = desiredReason;
+        try {
+          await clickButton(button);
+          setPonto(target);
+          attempts = 0;
+          log(target ? '>>> PONTO ABERTO <<<' : `>>> PONTO FECHADO (${reason}) <<<`);
+          // O estado desejado pode ter mudado enquanto o Discord carregava. O
+          // loop reconcilia imediatamente sem descartar essa segunda transição.
+        } catch (e) {
+          attempts += 1;
+          log(`Falha ao ${action} ponto (${attempts}/${desiredAttempts}): ${e.message}`);
+          if (attempts >= desiredAttempts) {
+            ctl.emit('erro', { action, message: e.message });
+            return false;
+          }
+          await sleep(desiredDelay);
+        }
+      }
+      return desiredOpen === null || desiredOpen === pontoOpen;
+    })().finally(() => { reconcilePromise = null; });
+    return reconcilePromise;
   };
+
+  const requestState = (open, reason, attempts = RECONCILE_RETRY_ATTEMPTS, delay = RECONCILE_RETRY_DELAY_MS) => {
+    desiredOpen = open;
+    desiredReason = reason;
+    desiredAttempts = attempts;
+    desiredDelay = delay;
+    return reconcile();
+  };
+
+  const doOpen = () => requestState(true, 'entrou em serviço');
+  const doClose = (reason) => requestState(false, reason || 'saiu de serviço');
 
   detector.on('status', ({ status, text, source }) => {
     log(`[status change via ${source}] ${status} — "${text}"`);
@@ -618,23 +766,19 @@ function wireDetector(detector, clickButton) {
   // FiveM perdido (você fechou o jogo). Se estiver em serviço, fecha o ponto
   // automaticamente. O monitor NUNCA encerra por isso: ele volta a sondar a rota
   // e reanexa sozinho quando o jogo abrir de novo.
-  detector.on('no-connection', async () => {
+  detector.on('no-connection', () => {
     log('Conexão com o FiveM perdida (sustentada). Sigo verificando até o jogo voltar.');
-    if (!pontoOpen) return;
-    for (let attempt = 1; attempt <= CLOSE_RETRY_ATTEMPTS && pontoOpen; attempt++) {
-      if (await doClose('FiveM fechado')) return;
-      log(`Não consegui fechar o ponto (tentativa ${attempt}/${CLOSE_RETRY_ATTEMPTS}). Nova tentativa em ${CLOSE_RETRY_DELAY_MS / 1000}s.`);
-      await sleep(CLOSE_RETRY_DELAY_MS);
-    }
-    if (pontoOpen) log('ATENÇÃO: o ponto continua aberto e não consegui fechar. Feche manualmente no Discord.');
+    requestState(false, 'FiveM fechado', CLOSE_RETRY_ATTEMPTS, CLOSE_RETRY_DELAY_MS);
   });
 
   detector.on('stopped', () => { log('Monitor encerrado.'); });
 
   Object.defineProperty(ctl, 'pontoOpen', { get: () => pontoOpen });
+  Object.defineProperty(ctl, 'desiredOpen', { get: () => desiredOpen });
   ctl.doOpen = doOpen;
   ctl.doClose = doClose;
+  ctl.whenIdle = () => reconcilePromise || Promise.resolve(true);
   return ctl;
 }
 
-module.exports = { DutyDetector, wireDetector, NUI_URL, sleep };
+module.exports = { DutyDetector, wireDetector, inferDutyTarget, OBSERVER_SOURCE, NUI_URL, sleep };
