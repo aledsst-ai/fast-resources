@@ -35,11 +35,11 @@ O instalador é gerado em `dist/`.
 
 ## Publicação de atualização
 
-Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.2`) em
+Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.3`) em
 `aledsst-ai/fast-resources` e anexe os três arquivos gerados em `dist/`:
 
-- `mtp-auto-timesheet-setup-1.1.2.exe`
-- `mtp-auto-timesheet-setup-1.1.2.exe.blockmap`
+- `mtp-auto-timesheet-setup-1.1.3.exe`
+- `mtp-auto-timesheet-setup-1.1.3.exe.blockmap`
 - `latest.yml`
 
 O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
@@ -50,4 +50,9 @@ O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
 - Mantém separado o token da `gameapi`, evitando substituição por tokens do telefone.
 - Confirma transições por observação visual, resposta de rede e consultas rápidas à API.
 - Serializa as ações do Discord para não perder uma saída durante a abertura do ponto.
-- Reconhece quando o Discord já está no estado desejado e evita cliques duplicados.
+
+## Correção da versão 1.1.3
+
+- Remove a inferência baseada no botão oposto do Discord, que podia considerar o
+  ponto aberto sem clicar em **Abrir Ponto**.
+- Mantém a captura instantânea da ação no tablet introduzida na versão 1.1.2.

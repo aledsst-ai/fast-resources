@@ -45,35 +45,22 @@ function escapeRegex(s) {
 
 // Procura o botão pelo texto. Pega o ÚLTIMO match: no Discord o mais recente
 // fica embaixo, e o canal pode ter painéis antigos com o mesmo botão.
-function buildClickScript(text, oppositeText) {
+function buildClickScript(text) {
   return `
 (() => {
   const rx = new RegExp(${JSON.stringify(escapeRegex(text))}, 'i');
-  const oppositeRx = new RegExp(${JSON.stringify(escapeRegex(oppositeText))}, 'i');
   const nodes = Array.from(document.querySelectorAll('button, [role="button"]'));
-  const hits = nodes.map((el, index) => ({ el, index })).filter(({ el }) => {
-    const label = el.textContent || '';
-    if (!rx.test(label) && !oppositeRx.test(label)) return false;
+  const hits = nodes.filter((el) => {
+    if (!rx.test(el.textContent || '')) return false;
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   });
-  if (!hits.length) return { clicked: false, matches: 0, oppositeMatches: 0, alreadyDesired: false };
-  const wanted = hits.filter(({ el }) => rx.test(el.textContent || ''));
-  const opposite = hits.filter(({ el }) => oppositeRx.test(el.textContent || ''));
-  const latest = hits[hits.length - 1];
-  if (oppositeRx.test(latest.el.textContent || '')) {
-    return {
-      clicked: false,
-      matches: wanted.length,
-      oppositeMatches: opposite.length,
-      alreadyDesired: true
-    };
-  }
-  const el = latest.el;
+  if (!hits.length) return { clicked: false, matches: 0 };
+  const el = hits[hits.length - 1];
   el.scrollIntoView({ block: 'center' });
   el.click();
-  return { clicked: true, matches: wanted.length, oppositeMatches: opposite.length, alreadyDesired: false };
+  return { clicked: true, matches: hits.length };
 })()
 `;
 }
@@ -212,7 +199,6 @@ class DiscordClient {
   // e fecha poucas vezes por sessão, então não vale manter o Discord na memória.
   async click(buttonText) {
     const win = createWindow(false);
-    const oppositeText = buttonText === 'Abrir Ponto' ? 'Fechar Ponto' : 'Abrir Ponto';
     try {
       await loadUrl(win, DISCORD_CHANNEL_URL);
       await waitFor(win, CHANNEL_READY_PROBE, CHANNEL_READY_TIMEOUT_MS, 'canal carregar');
@@ -222,13 +208,9 @@ class DiscordClient {
       while (Date.now() < deadline) {
         await win.webContents.executeJavaScript(SCROLL_BOTTOM).catch(() => {});
         const res = await win.webContents
-          .executeJavaScript(buildClickScript(buttonText, oppositeText))
-          .catch(() => ({ clicked: false, matches: 0, oppositeMatches: 0, alreadyDesired: false }));
+          .executeJavaScript(buildClickScript(buttonText))
+          .catch(() => ({ clicked: false, matches: 0 }));
         lastMatches = res.matches || 0;
-        if (res.alreadyDesired) {
-          log(`Discord já está no estado desejado: botão mais recente é "${oppositeText}".`);
-          return true;
-        }
         if (res.clicked) {
           log(`Clique em "${buttonText}" realizado${res.matches > 1 ? ` (${res.matches} botões encontrados, usei o mais recente)` : ''}.`);
           await sleep(2500); // deixa o Discord mandar a interação antes de fechar

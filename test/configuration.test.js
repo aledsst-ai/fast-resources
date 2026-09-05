@@ -56,7 +56,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação estável aponta para o repositório de atualizações', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.2');
+  assert.equal(pkg.version, '1.1.3');
   assert.equal(pkg.testBuild, undefined);
   assert.equal(pkg.build.appId, 'gg.metropole.mtpautotimesheet');
   assert.deepEqual(pkg.build.publish[0], {
@@ -64,6 +64,12 @@ test('publicação estável aponta para o repositório de atualizações', () =>
     owner: 'aledsst-ai',
     repo: 'fast-resources',
   });
+});
+
+test('Discord sempre clica no botão solicitado e não infere estado por outro botão', () => {
+  const source = fs.readFileSync(path.join(root, 'src', 'discord.js'), 'utf8');
+  assert.match(source, /buildClickScript\(buttonText\)/);
+  assert.doesNotMatch(source, /alreadyDesired|oppositeText|Discord já está no estado desejado/);
 });
 
 test('produção mantém inicialização automática e atualização habilitadas', () => {
