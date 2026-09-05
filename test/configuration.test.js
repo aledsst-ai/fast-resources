@@ -31,7 +31,19 @@ test('detector reconhece nomes da North Police', () => {
 test('notificações usam a identidade FAST - North Police', () => {
   const source = fs.readFileSync(path.join(root, 'src', 'notifier.js'), 'utf8');
   assert.equal((source.match(/FAST - North Police/g) || []).length, 2);
+  assert.match(source, /✅ Ponto aberto com sucesso/);
+  assert.match(source, /✅ Ponto fechado com sucesso/);
   assert.doesNotMatch(source, /Pol[ií]cia Capital/i);
+});
+
+test('avisos do Auxiliar de Anúncios não são enviados ao celular do FiveM', () => {
+  const notifier = fs.readFileSync(path.join(root, 'src', 'notifier.js'), 'utf8');
+  const localBody = notifier.match(/function notifyLocal[\s\S]+?\n}/)?.[0] || '';
+  assert.match(localBody, /showToast/);
+  assert.doesNotMatch(localBody, /notifyInGame/);
+
+  const main = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  assert.match(main, /notifyLocal\('FAST - Auxiliar de Anúncios'/);
 });
 
 test('emblema da North Police está incorporado ao pacote', () => {
@@ -44,7 +56,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação aponta para o novo repositório', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.0');
+  assert.equal(pkg.version, '1.1.1');
   assert.deepEqual(pkg.build.publish[0], {
     provider: 'github',
     owner: 'aledsst-ai',
@@ -52,7 +64,7 @@ test('publicação aponta para o novo repositório', () => {
   });
 });
 
-test('auxiliar Ctrl+V integrado compila e mantém compatibilidade com o site FAST', { timeout: 30_000 }, () => {
+test('Auxiliar de Anúncios integrado compila e mantém compatibilidade com o site FAST', { timeout: 30_000 }, () => {
   const helper = path.join(root, 'helper', 'clipboard-helper.ps1');
   execFileSync('powershell.exe', [
     '-NoProfile',
@@ -68,14 +80,17 @@ test('auxiliar Ctrl+V integrado compila e mantém compatibilidade com o site FAS
 
 test('aplicativo gerencia o auxiliar pela mesma bandeja', () => {
   const main = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
-  assert.match(main, /Ativar Auxiliar Ctrl\+V/);
-  assert.match(main, /Cancelar sequência Ctrl\+V/);
+  assert.match(main, /Ativar Auxiliar de Anúncios/);
+  assert.match(main, /Cancelar sequência de anúncio/);
+  assert.doesNotMatch(main, /por @guip1_/);
+  assert.match(main, /notifyLocal\('FAST - Auxiliar de Anúncios'/);
+  assert.doesNotMatch(main, /notify\('FAST - Auxiliar/);
   assert.match(main, /startClipboardHelper\(\)/);
   const pkg = require(path.join(root, 'package.json'));
   assert.equal(pkg.build.extraResources[0].to, 'helper');
 });
 
-test('ponte Ctrl+V inicia e encerra pelo canal interno', { timeout: 15_000 }, async (t) => {
+test('ponte do Auxiliar de Anúncios inicia e encerra pelo canal interno', { timeout: 15_000 }, async (t) => {
   const helper = path.join(root, 'helper', 'clipboard-helper.ps1');
   await new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', [

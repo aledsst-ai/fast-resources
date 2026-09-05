@@ -40,7 +40,7 @@ class ClipboardHelper extends EventEmitter {
     if (this.child) return true;
     const script = this.helperPath();
     if (!fs.existsSync(script)) {
-      const error = `Componente Ctrl+V não encontrado em ${script}`;
+      const error = `Componente do Auxiliar de Anúncios não encontrado em ${script}`;
       log(error);
       this._setState({ running: false, ready: false, error });
       return false;
@@ -72,10 +72,10 @@ class ClipboardHelper extends EventEmitter {
     lines.on('line', (line) => this._handleLine(line));
     child.stderr.on('data', (chunk) => {
       const message = String(chunk).trim();
-      if (message) log(`Auxiliar Ctrl+V: ${message}`);
+      if (message) log(`Auxiliar de Anúncios: ${message}`);
     });
     child.on('error', (err) => {
-      log(`Auxiliar Ctrl+V não iniciou: ${err.message}`);
+      log(`Auxiliar de Anúncios não iniciou: ${err.message}`);
       this._setState({ running: false, ready: false, error: err.message });
     });
     child.on('exit', (code) => {
@@ -84,8 +84,8 @@ class ClipboardHelper extends EventEmitter {
       const conflict = code === 10;
       const unexpected = !this.stopping && !conflict;
       const error = unexpected ? `Componente encerrado (código ${code ?? 'desconhecido'})` : '';
-      if (conflict) log('Outro Auxiliar Ctrl+V da FAST já está em execução.');
-      else if (unexpected) log(`Auxiliar Ctrl+V encerrou inesperadamente (${code}).`);
+      if (conflict) log('Outro Auxiliar de Anúncios da FAST já está em execução.');
+      else if (unexpected) log(`Auxiliar de Anúncios encerrou inesperadamente (${code}).`);
       this._setState({
         running: false,
         ready: false,
@@ -106,7 +106,7 @@ class ClipboardHelper extends EventEmitter {
     const parts = line.split('|');
     const type = parts[1];
     if (type === 'READY') {
-      log('Auxiliar Ctrl+V integrado está pronto.');
+      log('Auxiliar de Anúncios integrado está pronto.');
       this._setState({ running: true, ready: true, conflict: false, error: '' });
       return;
     }
@@ -116,7 +116,7 @@ class ClipboardHelper extends EventEmitter {
     }
     if (type === 'ERROR') {
       const error = parts.slice(2).join('|') || 'Erro desconhecido';
-      log(`Auxiliar Ctrl+V: ${error}`);
+      log(`Auxiliar de Anúncios: ${error}`);
       this._setState({ error });
       this.emit('helper-error', error);
       return;

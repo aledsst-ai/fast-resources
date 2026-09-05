@@ -25,18 +25,30 @@ function configureNotifier({ enabled, inGame, sound } = {}) {
 // Prefere o overlay dentro do jogo: em fullscreen exclusive a janela do Windows
 // não aparece. Cai pra janela quando o FiveM está fechado — que é justamente
 // quando avisos como "não consegui fechar o ponto" mais importam.
-async function notify(title, body, type = 'info') {
+function beginNotification(title, body) {
   if (!isEnabled()) return false;
   const key = `${title}|${body}`;
   const now = Date.now();
   if (key === lastNotif.key && now - lastNotif.at < DEDUP_WINDOW_MS) return false;
   lastNotif = { key, at: now };
+  return { sound: soundOn() };
+}
 
-  const som = soundOn();
+async function notify(title, body, type = 'info') {
+  const pending = beginNotification(title, body);
+  if (!pending) return false;
   try {
-    if (await notifyInGame(title, body, type, som)) return true;
+    if (await notifyInGame(title, body, type, pending.sound)) return true;
   } catch { /* cai pro fallback */ }
-  return showToast(title, body, type, som);
+  return showToast(title, body, type, pending.sound);
+}
+
+// Aviso exclusivo do computador. Eventos do Auxiliar de Anúncios não devem
+// aparecer no celular do FiveM, por isso eles não passam por notifyInGame.
+function notifyLocal(title, body, type = 'info') {
+  const pending = beginNotification(title, body);
+  if (!pending) return false;
+  return showToast(title, body, type, pending.sound);
 }
 
 // Liga os eventos do wireDetector aos avisos na tela.
@@ -44,8 +56,8 @@ function attachNotifications(ctl) {
   // O motivo fica só no log; no aviso ele só polui — o jogador acabou de fazer
   // a ação, não precisa que o programa o lembre disso.
   ctl.on('ponto', ({ open }) => {
-    if (open) notify('FAST - North Police', 'Ponto aberto no Discord automaticamente.', 'success');
-    else notify('FAST - North Police', 'Ponto fechado no Discord automaticamente.', 'success');
+    if (open) notify('FAST - North Police', '✅ Ponto aberto com sucesso', 'success');
+    else notify('FAST - North Police', '✅ Ponto fechado com sucesso', 'success');
   });
 
   // Falha é o que o usuário mais precisa saber: o ponto pode ter ficado aberto.
@@ -54,4 +66,4 @@ function attachNotifications(ctl) {
   });
 }
 
-module.exports = { notify, configureNotifier, attachNotifications };
+module.exports = { notify, notifyLocal, configureNotifier, attachNotifications };

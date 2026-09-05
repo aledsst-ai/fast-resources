@@ -8,12 +8,11 @@ const { log, setLogFile } = require('./core/logger');
 const { DutyDetector, wireDetector, NUI_URL } = require('./core/detector');
 const { DiscordClient } = require('./discord');
 const { ClipboardHelper } = require('./clipboard-helper');
-const { notify, configureNotifier, attachNotifications } = require('./notifier');
+const { notifyLocal, configureNotifier, attachNotifications } = require('./notifier');
 const { closeAllToasts } = require('./toast');
 const { setupUpdater, updateReady, installNow, checkNow } = require('./updater');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
-const AUTOR = '@guip1_';
 
 let tray = null;
 let detector = null;
@@ -100,22 +99,22 @@ function ensureClipboardHelper() {
     clipboardHelper = new ClipboardHelper();
     clipboardHelper.on('state', updateTray);
     clipboardHelper.on('helper-error', (message) => {
-      notify('FAST - Auxiliar Ctrl+V', message, 'error');
+      notifyLocal('FAST - Auxiliar de Anúncios', message, 'error');
     });
     clipboardHelper.on('helper-event', ({ name, count }) => {
       if (name === 'sequence-ready') {
-        notify('FAST - Auxiliar Ctrl+V', `${count} campos preparados. Use Ctrl+V em cada campo do jogo.`, 'success');
+        notifyLocal('FAST - Auxiliar de Anúncios', `${count} campos preparados. Use Ctrl+V em cada campo do jogo.`, 'success');
       } else if (name === 'sequence-complete') {
-        notify('FAST - Auxiliar Ctrl+V', 'Todos os campos foram colados.', 'success');
+        notifyLocal('FAST - Auxiliar de Anúncios', 'Todos os campos foram colados.', 'success');
       } else if (name === 'sequence-cancelled') {
-        notify('FAST - Auxiliar Ctrl+V', 'Sequência cancelada. O Ctrl+V voltou ao normal.');
+        notifyLocal('FAST - Auxiliar de Anúncios', 'Sequência cancelada. O Ctrl+V voltou ao normal.');
       }
     });
     clipboardHelper.on('exit', ({ conflict, unexpected }) => {
       if (conflict) {
-        notify('FAST - Auxiliar Ctrl+V', 'Outro auxiliar FAST já está aberto. Encerre a versão separada para usar a integrada.', 'error');
+        notifyLocal('FAST - Auxiliar de Anúncios', 'Outro auxiliar FAST já está aberto. Encerre a versão separada para usar a integrada.', 'error');
       } else if (unexpected) {
-        notify('FAST - Auxiliar Ctrl+V', 'O componente de colagem foi encerrado inesperadamente.', 'error');
+        notifyLocal('FAST - Auxiliar de Anúncios', 'O componente de colagem foi encerrado inesperadamente.', 'error');
       }
     });
   }
@@ -162,7 +161,7 @@ function updateTray() {
   const pronta = updateReady();
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Status: ${label}`, enabled: false },
-    { label: `Versão ${app.getVersion()} — por ${AUTOR}`, enabled: false },
+    { label: `Versão ${app.getVersion()}`, enabled: false },
     { type: 'separator' },
     ...(pronta ? [
       { label: `Reiniciar e atualizar para ${pronta.version}`, click: () => installNow() },
@@ -190,15 +189,15 @@ function updateTray() {
       click: (item) => { writeConfig({ sound: item.checked }); updateTray(); },
     },
     { type: 'separator' },
-    { label: `Auxiliar Ctrl+V: ${clipboardHelperLabel()}`, enabled: false },
+    { label: `Auxiliar de Anúncios: ${clipboardHelperLabel()}`, enabled: false },
     {
-      label: 'Ativar Auxiliar Ctrl+V',
+      label: 'Ativar Auxiliar de Anúncios',
       type: 'checkbox',
       checked: clipboardHelperEnabled(),
       click: (item) => toggleClipboardHelper(item.checked),
     },
     {
-      label: 'Cancelar sequência Ctrl+V',
+      label: 'Cancelar sequência de anúncio',
       enabled: !!(clipboardHelper && clipboardHelper.state.active),
       click: () => clipboardHelper && clipboardHelper.cancel(),
     },
@@ -279,7 +278,7 @@ async function doQuit() {
 
 app.whenReady().then(async () => {
   logFile = setLogFile(path.join(app.getPath('userData'), 'logs', 'mtp-auto-timesheet.log'));
-  log(`mtp-auto-timesheet ${app.getVersion()} — desenvolvido por ${AUTOR}`);
+  log(`mtp-auto-timesheet ${app.getVersion()}`);
   log(`Iniciando. FiveM esperado em ${NUI_URL}`);
   log(`Logs em ${logFile}`);
 
