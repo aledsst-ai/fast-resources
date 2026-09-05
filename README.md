@@ -19,3 +19,14 @@ npm run build
 ```
 
 O instalador é gerado em `dist/`.
+
+## Publicação de atualização
+
+Crie uma release com a tag correspondente à versão (por exemplo, `v1.0.7`) em
+`aledsst-ai/fast-resources` e anexe os três arquivos gerados em `dist/`:
+
+- `mtp-auto-timesheet-setup-1.0.7.exe`
+- `mtp-auto-timesheet-setup-1.0.7.exe.blockmap`
+- `latest.yml`
+
+O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
