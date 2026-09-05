@@ -35,11 +35,11 @@ O instalador é gerado em `dist/`.
 
 ## Publicação de atualização
 
-Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.3`) em
+Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.4`) em
 `aledsst-ai/fast-resources` e anexe os três arquivos gerados em `dist/`:
 
-- `mtp-auto-timesheet-setup-1.1.3.exe`
-- `mtp-auto-timesheet-setup-1.1.3.exe.blockmap`
+- `mtp-auto-timesheet-setup-1.1.4.exe`
+- `mtp-auto-timesheet-setup-1.1.4.exe.blockmap`
 - `latest.yml`
 
 O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
@@ -56,3 +56,10 @@ O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
 - Remove a inferência baseada no botão oposto do Discord, que podia considerar o
   ponto aberto sem clicar em **Abrir Ponto**.
 - Mantém a captura instantânea da ação no tablet introduzida na versão 1.1.2.
+
+## Correção da versão 1.1.4
+
+- Restringe a automação ao clique nos controles **Entrar em Serviço** e
+  **Sair de Serviço**.
+- Ignora cliques no menu lateral e em outros elementos cujo contêiner também
+  inclua o texto do botão de serviço.

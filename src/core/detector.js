@@ -137,10 +137,13 @@ const OBSERVER_SOURCE = `
   };
   var actionFromText = function(text){
     var value = clean(text);
-    if (/sair(?:[ ]+de)?[ ]+servi[cç]o/i.test(value)) {
+    // O texto precisa ser somente o rótulo do botão. Um clique em qualquer
+    // outro item também percorre contêineres ancestrais; esses contêineres
+    // incluem o texto do botão de serviço e não representam uma ação nele.
+    if (/^sair(?:[ ]+de)?[ ]+servi[cç]o$/i.test(value)) {
       return { action: 'exit', target: 'off-duty', text: value };
     }
-    if (/entrar(?:[ ]+em)?[ ]+servi[cç]o/i.test(value)) {
+    if (/^entrar(?:[ ]+em)?[ ]+servi[cç]o$/i.test(value)) {
       return { action: 'enter', target: 'on-duty', text: value };
     }
     return null;
