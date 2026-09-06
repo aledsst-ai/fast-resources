@@ -44,6 +44,16 @@ Crie uma release com a tag correspondente à versão (por exemplo, `v1.1.5`) em
 
 O aplicativo consulta esses arquivos automaticamente pelo `electron-updater`.
 
+## Vinculação ao Dashboard FAST
+
+A partir da versão 1.1.9, o menu da bandeja contém **Vincular ao Dashboard
+FAST**. A opção gera um código de oito caracteres, válido por dez minutos, que o
+membro confirma em **Dashboard > Ferramentas** com sua conta do Discord.
+
+Depois da vinculação, o aplicativo informa sua versão e a data da última
+comunicação ao iniciar, em cada registro de ponto e uma vez por dia enquanto
+estiver aberto. Falhas de rede nessa comunicação não interrompem o bate-ponto.
+
 ## Alterações da versão 1.1.2
 
 - Captura o clique de entrar ou sair de serviço antes de o tablet fechar.

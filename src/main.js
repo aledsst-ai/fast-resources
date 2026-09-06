@@ -1,6 +1,6 @@
 // Processo principal: vive na bandeja, sem janela. Faz o login do Discord uma vez,
 // roda o DutyDetector e traduz o estado dele em ícone/menu.
-const { app, Tray, Menu, dialog, shell, nativeImage } = require('electron');
+const { app, Tray, Menu, dialog, shell, nativeImage, safeStorage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -11,6 +11,7 @@ const { ClipboardHelper } = require('./clipboard-helper');
 const { notifyLocal, configureNotifier, attachNotifications } = require('./notifier');
 const { closeAllToasts } = require('./toast');
 const { setupUpdater, updateReady, installNow, checkNow } = require('./updater');
+const { FastDashboard, ORIGIN } = require('./fast-dashboard');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
 
@@ -23,6 +24,31 @@ let paused = false;
 let loggedIn = false;
 let quitting = false;
 let logFile = null;
+let fastDashboard = null;
+let fastDashboardTimer = null;
+
+async function linkFastDashboard() {
+  try {
+    const data = await fastDashboard.pair();
+    if (data.paired) {
+      await fastDashboard.heartbeat();
+      await dialog.showMessageBox({ type: 'info', title: 'FAST', message: 'Este aplicativo já está vinculado ao dashboard.' });
+      return;
+    }
+    const result = await dialog.showMessageBox({
+      type: 'info', title: 'Vincular ao Dashboard FAST',
+      message: `Seu código: ${data.code}`,
+      detail: 'Válido por 10 minutos. No Dashboard > Ferramentas, confirme o código com sua conta do Discord. O aplicativo informará sua versão e a última comunicação ao iniciar, registrar ponto e diariamente enquanto estiver aberto.',
+      buttons: ['Copiar código e abrir dashboard', 'Fechar'], defaultId: 0, cancelId: 1,
+    });
+    if (result.response === 0) {
+      clipboard.writeText(data.code);
+      await shell.openExternal(`${ORIGIN}/dashboard`);
+    }
+  } catch {
+    await dialog.showMessageBox({ type: 'error', title: 'FAST', message: 'Não foi possível vincular agora. Confira sua conexão e tente novamente.' });
+  }
+}
 
 // O Windows agrupa toasts pelo AppUserModelID. Sem isso, em vez do nome do app
 // a notificação sai como "electron.app.Electron".
@@ -162,6 +188,7 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Status: ${label}`, enabled: false },
     { label: `Versão ${app.getVersion()}`, enabled: false },
+    { label: 'Vincular ao Dashboard FAST', click: () => linkFastDashboard() },
     { type: 'separator' },
     ...(pronta ? [
       { label: `Reiniciar e atualizar para ${pronta.version}`, click: () => installNow() },
@@ -224,6 +251,7 @@ function startMonitor() {
   detector.on('attached', updateTray);
   detector.on('no-connection', updateTray);
   ctl.on('ponto', updateTray);
+  ctl.on('ponto', () => { if (fastDashboard) void fastDashboard.heartbeat(); });
   attachNotifications(ctl);
 
   detector.start().catch((err) => log(`Monitor caiu: ${err.message}`));
@@ -262,6 +290,7 @@ async function doLogin() {
 async function doQuit() {
   if (quitting) return;
   quitting = true;
+  clearInterval(fastDashboardTimer);
   if (tray) tray.setToolTip('FAST ⚡ — encerrando...');
   log('Encerrando a pedido do usuário.');
   closeAllToasts();
@@ -283,6 +312,24 @@ app.whenReady().then(async () => {
   log(`Logs em ${logFile}`);
 
   tray = new Tray(iconFor('waiting'));
+  fastDashboard = new FastDashboard({
+    version: app.getVersion(),
+    loadToken: () => {
+      const encrypted = readConfig().fastDashboardToken;
+      if (!encrypted) return '';
+      try { return safeStorage.decryptString(Buffer.from(encrypted, 'base64')); }
+      catch { writeConfig({ fastDashboardToken: '' }); return ''; }
+    },
+    saveToken: (token) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('secure_storage_unavailable');
+      const encrypted = safeStorage.encryptString(token).toString('base64');
+      writeConfig({ fastDashboardToken: encrypted });
+      if (readConfig().fastDashboardToken !== encrypted) throw new Error('storage_unavailable');
+    },
+  });
+  void fastDashboard.heartbeat();
+  fastDashboardTimer = setInterval(() => { void fastDashboard.heartbeat(); }, 24 * 60 * 60 * 1000);
+  fastDashboardTimer.unref();
   updateTray();
 
   // Aviso in-game: tenta o celular nativo (SignalR) primeiro; se nenhum socket
@@ -316,6 +363,10 @@ app.whenReady().then(async () => {
   if (cfg.openAtLogin === undefined) setOpenAtLogin(true);
 
   const ok = await doLogin();
+  if (!cfg.fastDashboardToken && cfg.fastDashboardPromptedVersion !== app.getVersion()) {
+    writeConfig({ fastDashboardPromptedVersion: app.getVersion() });
+    await linkFastDashboard();
+  }
   if (!ok) {
     log('Login não concluído. Use "Entrar no Discord..." na bandeja quando quiser.');
     dialog.showMessageBox({
@@ -328,6 +379,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  clearInterval(fastDashboardTimer);
   if (clipboardHelper) clipboardHelper.stopNow();
 });
 
