@@ -45,6 +45,20 @@ test('interface exibe o nome FAST com o raio', () => {
   assert.match(discord, /title: 'FAST ⚡ — Discord'/);
 });
 
+test('ícones da bandeja usam o emblema FAST em 16 e 32 px', () => {
+  const states = ['waiting', 'offduty', 'onduty', 'paused'];
+  for (const [suffix, size] of [['', 16], ['@2x', 32]]) {
+    const icons = states.map((state) => fs.readFileSync(path.join(root, 'assets', `tray-${state}${suffix}.png`)));
+    for (const icon of icons) {
+      assert.equal(icon.subarray(1, 4).toString('ascii'), 'PNG');
+      assert.equal(icon.readUInt32BE(16), size);
+      assert.equal(icon.readUInt32BE(20), size);
+      assert.ok(icon.length > 700, 'ícone simplificado antigo ainda presente');
+      assert.deepEqual(icon, icons[0]);
+    }
+  }
+});
+
 test('avisos do Auxiliar de Anúncios não são enviados ao celular do FiveM', () => {
   const notifier = fs.readFileSync(path.join(root, 'src', 'notifier.js'), 'utf8');
   const localBody = notifier.match(/function notifyLocal[\s\S]+?\n}/)?.[0] || '';
@@ -65,7 +79,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação estável aponta para o repositório de atualizações', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.6');
+  assert.equal(pkg.version, '1.1.8');
   assert.equal(pkg.testBuild, undefined);
   assert.equal(pkg.build.appId, 'gg.metropole.mtpautotimesheet');
   assert.deepEqual(pkg.build.publish[0], {
