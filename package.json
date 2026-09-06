@@ -1,7 +1,7 @@
 {
   "name": "mtp-auto-timesheet",
   "productName": "mtp-auto-timesheet",
-  "version": "1.1.9",
+  "version": "1.1.10",
   "description": "Abre e fecha o ponto no Discord automaticamente conforme o serviço no FiveM",
   "license": "UNLICENSED",
   "main": "src/main.js",

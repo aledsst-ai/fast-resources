@@ -79,7 +79,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação estável aponta para o repositório de atualizações', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.9');
+  assert.equal(pkg.version, '1.1.10');
   assert.equal(pkg.testBuild, undefined);
   assert.equal(pkg.build.appId, 'gg.metropole.mtpautotimesheet');
   assert.deepEqual(pkg.build.publish[0], {
@@ -103,6 +103,8 @@ test('produção mantém inicialização automática e atualização habilitadas
   assert.match(updater, /setInterval\(check, CHECK_INTERVAL_MS\)/);
   assert.match(main, /fastDashboardPromptedVersion/);
   assert.match(main, /Vincular ao Dashboard FAST/);
+  assert.match(main, /heartbeat\(open\)/);
+  assert.match(main, /5 \* 60 \* 1000/);
 });
 
 test('Auxiliar de Anúncios integrado compila e mantém compatibilidade com o site FAST', { timeout: 30_000 }, () => {

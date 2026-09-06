@@ -38,7 +38,7 @@ async function linkFastDashboard() {
     const result = await dialog.showMessageBox({
       type: 'info', title: 'Vincular ao Dashboard FAST',
       message: `Seu código: ${data.code}`,
-      detail: 'Válido por 10 minutos. No Dashboard > Ferramentas, confirme o código com sua conta do Discord. O aplicativo informará sua versão e a última comunicação ao iniciar, registrar ponto e diariamente enquanto estiver aberto.',
+      detail: 'Válido por 10 minutos. No Dashboard > Ferramentas, confirme o código com sua conta do Discord. O aplicativo informará sua versão, o estado de serviço e a última comunicação ao iniciar, registrar ponto e a cada cinco minutos enquanto estiver aberto.',
       buttons: ['Copiar código e abrir dashboard', 'Fechar'], defaultId: 0, cancelId: 1,
     });
     if (result.response === 0) {
@@ -251,7 +251,7 @@ function startMonitor() {
   detector.on('attached', updateTray);
   detector.on('no-connection', updateTray);
   ctl.on('ponto', updateTray);
-  ctl.on('ponto', () => { if (fastDashboard) void fastDashboard.heartbeat(); });
+  ctl.on('ponto', ({ open }) => { if (fastDashboard) void fastDashboard.heartbeat(open); });
   attachNotifications(ctl);
 
   detector.start().catch((err) => log(`Monitor caiu: ${err.message}`));
@@ -262,6 +262,7 @@ function startMonitor() {
 // aberto deixaria hora correndo sem ninguém em serviço.
 async function stopMonitor(reason) {
   if (ctl && ctl.pontoOpen) await ctl.doClose(reason);
+  if (fastDashboard) await fastDashboard.heartbeat(false);
   if (detector) detector.stop();
   detector = null;
   ctl = null;
@@ -326,9 +327,10 @@ app.whenReady().then(async () => {
       writeConfig({ fastDashboardToken: encrypted });
       if (readConfig().fastDashboardToken !== encrypted) throw new Error('storage_unavailable');
     },
+    getOnDuty: () => Boolean(ctl?.pontoOpen),
   });
   void fastDashboard.heartbeat();
-  fastDashboardTimer = setInterval(() => { void fastDashboard.heartbeat(); }, 24 * 60 * 60 * 1000);
+  fastDashboardTimer = setInterval(() => { void fastDashboard.heartbeat(); }, 5 * 60 * 1000);
   fastDashboardTimer.unref();
   updateTray();
 
