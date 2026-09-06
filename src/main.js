@@ -157,7 +157,7 @@ function updateTray() {
   if (!tray || quitting) return;
   const { icon, label } = trayState();
   tray.setImage(iconFor(icon));
-  tray.setToolTip(`mtp-auto-timesheet — ${label}`);
+  tray.setToolTip(`FAST ⚡ — ${label}`);
   const pronta = updateReady();
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Status: ${label}`, enabled: false },
@@ -262,7 +262,7 @@ async function doLogin() {
 async function doQuit() {
   if (quitting) return;
   quitting = true;
-  if (tray) tray.setToolTip('mtp-auto-timesheet — encerrando...');
+  if (tray) tray.setToolTip('FAST ⚡ — encerrando...');
   log('Encerrando a pedido do usuário.');
   closeAllToasts();
   try {
@@ -320,7 +320,7 @@ app.whenReady().then(async () => {
     log('Login não concluído. Use "Entrar no Discord..." na bandeja quando quiser.');
     dialog.showMessageBox({
       type: 'info',
-      title: 'mtp-auto-timesheet',
+      title: 'FAST ⚡',
       message: 'Login do Discord não concluído.',
       detail: 'O programa continua na bandeja (perto do relógio). Clique com o botão direito no ícone e escolha "Entrar no Discord..." para tentar de novo.',
     }).catch(() => {});

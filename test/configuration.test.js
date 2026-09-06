@@ -36,6 +36,15 @@ test('notificações usam a identidade FAST - North Police', () => {
   assert.doesNotMatch(source, /Pol[ií]cia Capital/i);
 });
 
+test('interface exibe o nome FAST com o raio', () => {
+  const main = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  const discord = fs.readFileSync(path.join(root, 'src', 'discord.js'), 'utf8');
+  assert.match(main, /FAST ⚡ — \$\{label\}/);
+  assert.match(main, /FAST ⚡ — encerrando/);
+  assert.match(main, /title: 'FAST ⚡'/);
+  assert.match(discord, /title: 'FAST ⚡ — Discord'/);
+});
+
 test('avisos do Auxiliar de Anúncios não são enviados ao celular do FiveM', () => {
   const notifier = fs.readFileSync(path.join(root, 'src', 'notifier.js'), 'utf8');
   const localBody = notifier.match(/function notifyLocal[\s\S]+?\n}/)?.[0] || '';
@@ -56,7 +65,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação estável aponta para o repositório de atualizações', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.5');
+  assert.equal(pkg.version, '1.1.6');
   assert.equal(pkg.testBuild, undefined);
   assert.equal(pkg.build.appId, 'gg.metropole.mtpautotimesheet');
   assert.deepEqual(pkg.build.publish[0], {

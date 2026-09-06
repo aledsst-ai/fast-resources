@@ -70,7 +70,7 @@ function createWindow(show) {
     show,
     width: 1180,
     height: 820,
-    title: 'mtp-auto-timesheet — Discord',
+    title: 'FAST ⚡ — Discord',
     autoHideMenuBar: true,
     webPreferences: {
       partition: PARTITION,
