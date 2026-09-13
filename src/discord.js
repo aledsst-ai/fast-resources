@@ -6,9 +6,9 @@
 const { BrowserWindow, session } = require('electron');
 const { log } = require('./core/logger');
 
-// Canal do ponto da FAST - North Police (Metrópole). É só o link do canal —
-// dá pra trocar por outro servidor mudando esta linha.
-const DISCORD_CHANNEL_URL = 'https://discord.com/channels/1197567547936079922/1222646689203097772';
+// O canal foi removido da versão final de encerramento. O monitor também não
+// é iniciado em src/main.js, mas esta proteção evita uma operação acidental.
+const DISCORD_CHANNEL_URL = '';
 const DISCORD_HOME_URL = 'https://discord.com/channels/@me';
 const PARTITION = 'persist:discord';
 
@@ -198,6 +198,7 @@ class DiscordClient {
   // Clica no botão do canal. Janela sob demanda, destruída no fim: o ponto abre
   // e fecha poucas vezes por sessão, então não vale manter o Discord na memória.
   async click(buttonText) {
+    if (!DISCORD_CHANNEL_URL) throw new Error('Aplicativo descontinuado.');
     const win = createWindow(false);
     try {
       await loadUrl(win, DISCORD_CHANNEL_URL);

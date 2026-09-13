@@ -1,16 +1,18 @@
 # FAST - North Police Auto Timesheet
 
+> **Projeto descontinuado.** A versão `2.0.0` é a atualização final: ela
+> mantém o atualizador disponível, mas não faz login no Discord nem monitora o
+> FiveM. Desinstale o aplicativo depois de receber essa atualização.
+
 Aplicativo de bandeja para abrir e fechar automaticamente o ponto no Discord conforme o estado de serviço no FiveM da Metrópole.
 
 Também incorpora o Auxiliar de Anúncios da FAST: ao copiar uma sequência preparada
 pelo Gerador de Anúncios, cada `Ctrl+V` cola o próximo campo no FiveM. O atalho
 só é interceptado enquanto existe uma sequência ativa.
 
-## Integrações configuradas
+## Integrações configuradas (versões anteriores)
 
-- Servidor Discord: `1197567547936079922`
-- Canal do ponto: `1222646689203097772`
-- Botões: `Abrir Ponto` e `Fechar Ponto`
+- O canal e os botões do ponto não são mais usados na versão final.
 - Corporações reconhecidas: `Polícia Norte`, `Polícia do Norte`, `Polícia Militar Norte`, `Polícia Militar do Norte` e `North Police`
 - Atualizações: releases de `aledsst-ai/fast-resources`
 - Auxiliar de Anúncios: compatível com o payload `FAST_ANNOUNCEMENT_QUEUE_V1`

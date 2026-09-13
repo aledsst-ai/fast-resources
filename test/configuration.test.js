@@ -6,10 +6,10 @@ const { execFileSync, spawn } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 
-test('Discord aponta para o servidor e canal da FAST', () => {
+test('versão final não mantém o endereço do canal do Discord', () => {
   const source = fs.readFileSync(path.join(root, 'src', 'discord.js'), 'utf8');
-  assert.match(source, /discord\.com\/channels\/1197567547936079922\/1222646689203097772/);
-  assert.match(source, /Abrir Ponto|buttonText/);
+  assert.doesNotMatch(source, /discord\.com\/channels\/\d+\/\d+/);
+  assert.match(source, /Aplicativo descontinuado/);
 });
 
 test('detector reconhece nomes da North Police', () => {
@@ -79,7 +79,7 @@ test('emblema da North Police está incorporado ao pacote', () => {
 
 test('publicação estável aponta para o repositório de atualizações', () => {
   const pkg = require(path.join(root, 'package.json'));
-  assert.equal(pkg.version, '1.1.10');
+  assert.equal(pkg.version, '2.0.0');
   assert.equal(pkg.testBuild, undefined);
   assert.equal(pkg.build.appId, 'gg.metropole.mtpautotimesheet');
   assert.deepEqual(pkg.build.publish[0], {
@@ -105,6 +105,17 @@ test('produção mantém inicialização automática e atualização habilitadas
   assert.match(main, /Vincular ao Dashboard FAST/);
   assert.match(main, /heartbeat\(open\)/);
   assert.match(main, /5 \* 60 \* 1000/);
+});
+
+test('versão final desativa o monitoramento e a inicialização automática', () => {
+  const main = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  const updater = fs.readFileSync(path.join(root, 'src', 'updater.js'), 'utf8');
+  assert.match(main, /const APP_RETIRED = true/);
+  assert.match(main, /setOpenAtLogin\(false\)/);
+  assert.match(main, /O bate-ponto foi encerrado/);
+  assert.match(main, /if \(!APP_RETIRED\) startClipboardHelper\(\)/);
+  assert.match(updater, /autoUpdater\.autoDownload = true/);
+  assert.match(updater, /autoUpdater\.autoInstallOnAppQuit = true/);
 });
 
 test('Auxiliar de Anúncios integrado compila e mantém compatibilidade com o site FAST', { timeout: 30_000 }, () => {

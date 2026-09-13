@@ -14,6 +14,9 @@ const { setupUpdater, updateReady, installNow, checkNow } = require('./updater')
 const { FastDashboard, ORIGIN } = require('./fast-dashboard');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
+// Versão final de encerramento. O updater continua ativo para permitir que
+// instalações antigas recebam esta versão antes do repositório ser arquivado.
+const APP_RETIRED = true;
 
 let tray = null;
 let detector = null;
@@ -120,6 +123,17 @@ function clipboardHelperLabel() {
   return 'Ativo — aguardando sequência';
 }
 
+function showRetirementNotice() {
+  const cfg = readConfig();
+  if (cfg.retirementNoticeVersion === app.getVersion()) return;
+  writeConfig({ retirementNoticeVersion: app.getVersion() });
+  notifyLocal(
+    'FAST — aplicativo descontinuado',
+    'O bate-ponto foi encerrado. Remova este aplicativo do computador; ele não fará mais login nem monitorará o FiveM.',
+    'warning',
+  );
+}
+
 function ensureClipboardHelper() {
   if (!clipboardHelper) {
     clipboardHelper = new ClipboardHelper();
@@ -166,6 +180,7 @@ async function toggleClipboardHelper(enabled) {
 // -------- Bandeja --------
 
 function trayState() {
+  if (APP_RETIRED) return { icon: 'paused', label: 'Aplicativo descontinuado' };
   if (!loggedIn) return { icon: 'paused', label: 'Não conectado ao Discord' };
   if (paused) return { icon: 'paused', label: 'Pausado' };
   if (ctl && ctl.pontoOpen) return { icon: 'onduty', label: 'Em serviço — ponto aberto' };
@@ -185,6 +200,23 @@ function updateTray() {
   tray.setImage(iconFor(icon));
   tray.setToolTip(`FAST ⚡ — ${label}`);
   const pronta = updateReady();
+  if (APP_RETIRED) {
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'FAST — aplicativo descontinuado', enabled: false },
+      { label: `Versão ${app.getVersion()}`, enabled: false },
+      { label: 'O bate-ponto foi encerrado e não será iniciado.', enabled: false },
+      { type: 'separator' },
+      ...(pronta ? [
+        { label: `Reiniciar e atualizar para ${pronta.version}`, click: () => installNow() },
+        { type: 'separator' },
+      ] : []),
+      { label: 'Procurar atualização', enabled: app.isPackaged && !pronta, click: () => checkNow() },
+      { label: 'Ver logs', click: () => { if (logFile) shell.openPath(logFile); } },
+      { type: 'separator' },
+      { label: 'Sair', click: () => doQuit() },
+    ]));
+    return;
+  }
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Status: ${label}`, enabled: false },
     { label: `Versão ${app.getVersion()}`, enabled: false },
@@ -329,10 +361,11 @@ app.whenReady().then(async () => {
     },
     getOnDuty: () => Boolean(ctl?.pontoOpen),
   });
-  void fastDashboard.heartbeat();
-  fastDashboardTimer = setInterval(() => { void fastDashboard.heartbeat(); }, 5 * 60 * 1000);
-  fastDashboardTimer.unref();
-  updateTray();
+  if (!APP_RETIRED) {
+    void fastDashboard.heartbeat();
+    fastDashboardTimer = setInterval(() => { void fastDashboard.heartbeat(); }, 5 * 60 * 1000);
+    fastDashboardTimer.unref();
+  }
 
   // Aviso in-game: tenta o celular nativo (SignalR) primeiro; se nenhum socket
   // foi capturado ainda ou o formato da metrópole mudou, cai no overlay nosso.
@@ -347,7 +380,7 @@ app.whenReady().then(async () => {
       return detector.notifyInGame(t, b, type, som);
     },
   });
-  startClipboardHelper();
+  if (!APP_RETIRED) startClipboardHelper();
   discord = new DiscordClient();
 
   // beforeInstall: o updater reinicia o app, então o ponto precisa fechar antes.
@@ -358,6 +391,13 @@ app.whenReady().then(async () => {
       stopClipboardHelper(),
     ]),
   });
+
+  if (APP_RETIRED) {
+    setOpenAtLogin(false);
+    showRetirementNotice();
+    updateTray();
+    return;
+  }
 
   // Primeira execução: liga o autostart por padrão, mas só uma vez —
   // se o usuário desmarcar depois, respeitamos a escolha dele.
